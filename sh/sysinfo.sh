@@ -257,9 +257,19 @@ confspeed=$(grep -m1 'Configured.*Speed' "$f" | sed 's/.*Speed:[[:space:]]*//' |
             "${locator}${bank_str}" "$size" "$type_str" "$speed_str" "$detail"
     }
 
+    # in_block=false
+    # while IFS= read -r line; do
+    #     if [[ "$line" =~ ^Handle.*DMI\ type\ 17 ]]; then
+    #         parse_dimm_block "$BLOCK_TMP"
+    #         > "$BLOCK_TMP"
+    #         in_block=true
+    #     else
+    #         [[ "$in_block" == true ]] && printf '%s\n' "$line" >> "$BLOCK_TMP"
+    #     fi
+    # done < "$DIMM_TMP"
     in_block=false
     while IFS= read -r line; do
-        if [[ "$line" =~ ^Handle.*DMI\ type\ 17 ]]; then
+        if [[ "$line" == Handle* ]] && [[ "$line" =~ [Dd][Mm][Ii] ]] && [[ "$line" =~ type[[:space:]]*17 ]]; then
             parse_dimm_block "$BLOCK_TMP"
             > "$BLOCK_TMP"
             in_block=true
