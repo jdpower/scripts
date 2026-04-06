@@ -214,7 +214,9 @@ if command -v dmidecode &>/dev/null; then
         [[ -z "$locator" ]] && return
         bank=$(grep      -m1 'Bank Locator:'          "$f" | sed 's/.*Bank Locator:[[:space:]]*//' | xargs)
         size=$(grep      -m1 '^\s*Size:'              "$f" | sed 's/.*Size:[[:space:]]*//' | xargs)
-        speed=$(grep     -m1 'Speed:'                 "$f" | grep -v 'Configured' | sed 's/.*Speed:[[:space:]]*//' | xargs)
+        # speed=$(grep     -m1 'Speed:'                 "$f" | grep -v 'Configured' | sed 's/.*Speed:[[:space:]]*//' | xargs)
+        speed=$(grep -m1 'Speed:' "$f" | grep -v 'Configured\|Voltage' | sed 's/.*Speed:[[:space:]]*//' | xargs)
+confspeed=$(grep -m1 'Configured.*Speed' "$f" | sed 's/.*Speed:[[:space:]]*//' | xargs)
         confspeed=$(grep -m1 'Configured.*Speed:'     "$f" | sed 's/.*Speed:[[:space:]]*//' | xargs)
         # Type: must not match Form Factor / Error / Detail / Configured lines
         mtype=$(grep     -m1 'Type:'                  "$f" | grep -v 'Form\|Error\|Detail\|Configured\|Asset\|Part' | sed 's/.*Type:[[:space:]]*//' | xargs)
