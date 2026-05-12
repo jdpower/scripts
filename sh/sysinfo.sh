@@ -206,10 +206,10 @@ show_cpu() {
         CPU_USAGE=$(mpstat 1 1 2>/dev/null | awk '/Average/{printf "%.1f%%", 100-$NF}')
     elif [[ -r /proc/stat ]]; then
         # shellcheck disable=SC2034
-        read -r _ u n s id wa _ < <(grep '^cpu ' /proc/stat)
+        read -r cpu_ignored u n s id wa _ < <(grep '^cpu ' /proc/stat)
         sleep 0.3
         # shellcheck disable=SC2034
-        read -r _ u2 n2 s2 id2 wa2 _ < <(grep '^cpu ' /proc/stat)
+        read -r cpu_ignored2 u2 n2 s2 id2 wa2 _ < <(grep '^cpu ' /proc/stat)
         total=$(( (u2+n2+s2+id2+wa2) - (u+n+s+id+wa) ))
         idle=$(( id2 - id ))
         (( total > 0 )) && CPU_USAGE=$(awk "BEGIN{printf \"%.1f%%\", 100-($idle/$total*100)}")
@@ -309,7 +309,8 @@ show_ram() {
         while IFS= read -r line; do
             if [[ "$line" == Handle* ]] && [[ "$line" =~ [Dd][Mm][Ii] ]] && [[ "$line" =~ type[[:space:]]*17 ]]; then
                 parse_dimm_block "$BLOCK_TMP"
-                cat /dev/null > "$BLOCK_TMP"
+                # shellcheck disable=SC2188
+                > "$BLOCK_TMP"
                 in_block=true
             else
                 [[ "$in_block" == true ]] && printf '%s\n' "$line" >> "$BLOCK_TMP"
