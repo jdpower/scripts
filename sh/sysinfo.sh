@@ -98,6 +98,31 @@ row "📦" "Installed Pkgs"  "$PACKAGES"    "$FG_PURPLE"
 row "🐚" "Shell"           "$SHELL_VER"   "$FG_WHITE"
 
 # ════════════════════════════════════════════════════════════
+#  1b. RASPBERRY PI HARDWARE  (shown only on Pi)
+# ════════════════════════════════════════════════════════════
+
+# Detect Raspberry Pi: /proc/device-tree/model contains the full board name
+RPI_MODEL=""
+if [[ -f /proc/device-tree/model ]]; then
+    RPI_MODEL=$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)
+fi
+IS_RPI=false
+[[ "$RPI_MODEL" == *"Raspberry Pi"* ]] && IS_RPI=true
+
+if $IS_RPI; then
+    section "🍓" "RASPBERRY PI HARDWARE" "$FG_RED"
+
+    RPI_HW=$(grep 'Hardware' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    RPI_REV=$(grep 'Revision' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    RPI_SERIAL=$(grep 'Serial' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+
+    row "🍓" "Model"          "$RPI_MODEL"   "$FG_RED"
+    [[ -n "$RPI_HW"     ]] && row "🔲" "SoC / Hardware" "$RPI_HW"     "$FG_ORANGE"
+    [[ -n "$RPI_REV"    ]] && row "🔢" "Board Revision" "$RPI_REV"    "$FG_YELLOW"
+    [[ -n "$RPI_SERIAL" ]] && row "🔑" "Serial Number"  "$RPI_SERIAL" "$FG_GREY"
+fi
+
+# ════════════════════════════════════════════════════════════
 #  2. CPU
 # ════════════════════════════════════════════════════════════
 section "⚡" "PROCESSOR (CPU)" "$FG_CYAN"
@@ -107,19 +132,31 @@ CPU_CORES=$(nproc --all 2>/dev/null || grep -c '^processor' /proc/cpuinfo)
 CPU_THREADS=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo "$CPU_CORES")
 CPU_MHZ=$(grep -m1 'cpu MHz' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs | awk '{printf "%.0f MHz", $1}' || echo "N/A")
 
-# Detect vendor: AMD or Intel
+# Detect vendor: AMD, Intel, or ARM (e.g. Raspberry Pi)
 CPU_VENDOR=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+CPU_HW=$(grep -m1 'Hardware' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
 if [[ "$CPU_VENDOR" == *"AMD"* ]]; then
     CPU_BRAND="AMD"
     VIRT_FLAG="svm"
-else
+elif [[ "$CPU_VENDOR" == *"Intel"* || "$CPU_VENDOR" == *"GenuineIntel"* ]]; then
     CPU_BRAND="Intel"
     VIRT_FLAG="vmx"
+elif [[ -n "$CPU_HW" ]]; then
+    # ARM-based SoC (Raspberry Pi, other SBCs) — no x86 vendor_id
+    CPU_BRAND="$CPU_HW"
+    VIRT_FLAG=""
+else
+    CPU_BRAND="${CPU_VENDOR:-Unknown}"
+    VIRT_FLAG=""
 fi
 
 # Virtualisation support
 CPU_FLAGS=$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null)
-[[ "$CPU_FLAGS" == *"$VIRT_FLAG"* ]] && VIRT="Yes ($CPU_BRAND-V)" || VIRT="No"
+if [[ -n "$VIRT_FLAG" ]]; then
+    [[ "$CPU_FLAGS" == *"$VIRT_FLAG"* ]] && VIRT="Yes ($CPU_BRAND-V)" || VIRT="No"
+else
+    VIRT="N/A (ARM)"
+fi
 
 # Physical core / socket count via dmidecode (works on both AMD & Intel)
 CPU_SOCKETS="1"
