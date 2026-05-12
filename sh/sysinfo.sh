@@ -63,7 +63,7 @@ bar() {
     elif (( pct >= 50 )); then color="$FG_YELLOW"
     else color="$FG_GREEN"
     fi
-    printf "${color}["
+    printf '%b[' "$color"
     printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
     printf '░%.0s' $(seq 1 $empty  2>/dev/null) 2>/dev/null || true
     printf "] %3s%%${RESET}" "$pct"
@@ -185,7 +185,6 @@ show_cpu() {
     CPU_PHYS_CORES=""
     if command -v dmidecode &>/dev/null; then
         CPU_SOCKETS=$(dmidecode -t processor 2>/dev/null | grep -c 'Socket Designation:' || echo "1")
-        CPU_PHYS_CORES=$(dmidecode -t processor 2>/dev/null | grep -m1 'Core Count:' | awk '{print $NF}')
         CPU_MAX_MHZ=$(dmidecode -t processor 2>/dev/null | grep -m1 'Max Speed:' | sed 's/.*Max Speed:[[:space:]]*//')
         CPU_SOCKET_TYPE=$(dmidecode -t processor 2>/dev/null | grep -m1 'Socket Designation:' | sed 's/.*Socket Designation:[[:space:]]*//')
     fi
@@ -207,9 +206,9 @@ show_cpu() {
     if command -v mpstat &>/dev/null; then
         CPU_USAGE=$(mpstat 1 1 2>/dev/null | awk '/Average/{printf "%.1f%%", 100-$NF}')
     elif [[ -r /proc/stat ]]; then
-        read -r cpu u n s id wa _ < <(grep '^cpu ' /proc/stat)
+        read -r _ u n s id wa _ < <(grep '^cpu ' /proc/stat)
         sleep 0.3
-        read -r cpu2 u2 n2 s2 id2 wa2 _ < <(grep '^cpu ' /proc/stat)
+        read -r _ u2 n2 s2 id2 wa2 _ < <(grep '^cpu ' /proc/stat)
         total=$(( (u2+n2+s2+id2+wa2) - (u+n+s+id+wa) ))
         idle=$(( id2 - id ))
         (( total > 0 )) && CPU_USAGE=$(awk "BEGIN{printf \"%.1f%%\", 100-($idle/$total*100)}")
@@ -223,8 +222,11 @@ show_cpu() {
     [[ "$CPU_SOCKETS" -gt 1 ]] 2>/dev/null && row "🖥️ " "Physical Sockets" "$CPU_SOCKETS" "$FG_WHITE"
     row "⚡" "Current Speed"    "$CPU_MHZ"     "$FG_WHITE"
     [[ -n "$CPU_MAX_MHZ" ]]     && row "🚀" "Max (Boost) Speed" "$CPU_MAX_MHZ"  "$FG_CYAN"
-    [[ -n "$CPU_L3" ]]          && row "🗃️" "L3 Cache"          "$CPU_L3"       "$FG_GREY" \
-                                || { [[ -n "$CPU_L1" ]] && row "🗃️ " "Cache" "$CPU_L1" "$FG_GREY"; }
+    if [[ -n "$CPU_L3" ]]; then
+        row "🗃️" "L3 Cache" "$CPU_L3" "$FG_GREY"
+    elif [[ -n "$CPU_L1" ]]; then
+        row "🗃️ " "Cache" "$CPU_L1" "$FG_GREY"
+    fi
     row "🏋️" "CPU Usage"         "$CPU_USAGE"   "$FG_GREEN"
     row "📊" "Load Avg (1/5/15)" "$LOAD"        "$FG_BLUE"
     row "🧪" "Virtualisation"    "$VIRT"        "$FG_PURPLE"
@@ -238,7 +240,6 @@ show_ram() {
     MEM_USED_RAW=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%.1f", (t-a)/1048576}' /proc/meminfo)
     MEM_PCT=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%.0f", (t-a)/t*100}' /proc/meminfo)
     SWAP_TOTAL=$(awk '/SwapTotal/{printf "%.1f GiB", $2/1048576}' /proc/meminfo)
-    SWAP_FREE=$(awk '/SwapFree/{printf "%.1f GiB", $2/1048576}' /proc/meminfo)
     SWAP_PCT=$(awk '/SwapTotal/{t=$2}/SwapFree/{f=$2}END{if(t>0) printf "%.0f", (t-f)/t*100; else print "0"}' /proc/meminfo)
 
     MEM_BAR=$(bar "$MEM_PCT")
@@ -307,7 +308,7 @@ show_ram() {
         while IFS= read -r line; do
             if [[ "$line" == Handle* ]] && [[ "$line" =~ [Dd][Mm][Ii] ]] && [[ "$line" =~ type[[:space:]]*17 ]]; then
                 parse_dimm_block "$BLOCK_TMP"
-                > "$BLOCK_TMP"
+                : > "$BLOCK_TMP"
                 in_block=true
             else
                 [[ "$in_block" == true ]] && printf '%s\n' "$line" >> "$BLOCK_TMP"
