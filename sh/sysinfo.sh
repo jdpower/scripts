@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  sysinfo.sh — Ubuntu Hardware & System Inspector
+#  sysinfo.sh — Linux Hardware & System Inspector
 #  Usage: ./sysinfo.sh [-o] [-c] [-r] [-s] [-n] [-g] [-h]
 # ============================================================
 
@@ -39,6 +39,17 @@ row() {
     printf "  ${FG_GREY}${icon}${RESET}  ${DIM}${FG_WHITE}%-22s${RESET}  ${vcolor}${BOLD}%s${RESET}\n" "$key" "$val"
 }
 
+device_model() {
+    [[ -r /proc/device-tree/model ]] || return
+    tr -d '\0' < /proc/device-tree/model 2>/dev/null
+}
+
+lscpu_value() {
+    local field="$1"
+    command -v lscpu &>/dev/null || return
+    lscpu 2>/dev/null | awk -F: -v key="$field" '$1 == key {sub(/^[[:space:]]+/, "", $2); print $2; exit}'
+}
+
 # ── Helper: Percentage bar ───────────────────────────────────
 bar() {
     local pct="${1//%/}"
@@ -52,7 +63,7 @@ bar() {
     elif (( pct >= 50 )); then color="$FG_YELLOW"
     else color="$FG_GREEN"
     fi
-    printf "${color}["
+    printf '%s[' "$color"
     printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
     printf '░%.0s' $(seq 1 $empty  2>/dev/null) 2>/dev/null || true
     printf "] %3s%%${RESET}" "$pct"
@@ -60,7 +71,7 @@ bar() {
 
 # ── Helper: Usage ────────────────────────────────────────────
 usage() {
-    echo -e "${FG_ORANGE}${BOLD}  sysinfo.sh${RESET} — Ubuntu Hardware & System Inspector"
+    echo -e "${FG_ORANGE}${BOLD}  sysinfo.sh${RESET} — Linux Hardware & System Inspector"
     echo ""
     echo -e "  ${FG_WHITE}${BOLD}Usage:${RESET}  ./sysinfo.sh [options]"
     echo ""
@@ -89,6 +100,7 @@ usage() {
 show_os() {
     section "🐧" "OPERATING SYSTEM" "$FG_ORANGE"
 
+    DEVICE_MODEL=$(device_model)
     OS_NAME=$(grep '^PRETTY_NAME' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "Unknown")
     OS_ID=$(grep '^VERSION_ID' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "?")
     CODENAME=$(grep '^VERSION_CODENAME' /etc/os-release 2>/dev/null | cut -d= -f2 || echo "?")
@@ -103,6 +115,7 @@ show_os() {
 
     row "🏷️" "Distribution"    "$OS_NAME"     "$FG_ORANGE"
     row "🔢" "Version"         "$OS_ID ($CODENAME)" "$FG_YELLOW"
+    [[ -n "$DEVICE_MODEL" ]] && row "🍓" "Device" "$DEVICE_MODEL" "$FG_ORANGE"
     row "🐚" "Kernel"          "$KERNEL"      "$FG_CYAN"
     row "📐" "Architecture"    "$ARCH"        "$FG_GREEN"
     row "🖥️" "Hostname"        "$HOSTNAME"    "$FG_WHITE"
@@ -116,28 +129,61 @@ show_os() {
 show_cpu() {
     section "⚡" "PROCESSOR (CPU)" "$FG_CYAN"
 
-    CPU_MODEL=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo "Unknown")
-    CPU_CORES=$(nproc --all 2>/dev/null || grep -c '^processor' /proc/cpuinfo)
-    CPU_THREADS=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo "$CPU_CORES")
-    CPU_MHZ=$(grep -m1 'cpu MHz' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs | awk '{printf "%.0f MHz", $1}' || echo "N/A")
+    DEVICE_MODEL=$(device_model)
+    CPU_MODEL=$(lscpu_value "Model name")
+    [[ -z "$CPU_MODEL" ]] && CPU_MODEL=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    [[ -z "$CPU_MODEL" ]] && CPU_MODEL=$(grep -m1 '^Hardware' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    [[ -z "$CPU_MODEL" ]] && CPU_MODEL=$(grep -m1 '^Processor' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    [[ -z "$CPU_MODEL" ]] && CPU_MODEL="$DEVICE_MODEL"
+    [[ -z "$CPU_MODEL" ]] && CPU_MODEL="Unknown"
 
-    CPU_VENDOR=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    CPU_ARCH=$(lscpu_value "Architecture")
+    [[ -z "$CPU_ARCH" ]] && CPU_ARCH=$(uname -m)
+
+    CPU_LOGICAL=$(lscpu_value "CPU(s)")
+    [[ -z "$CPU_LOGICAL" ]] && CPU_LOGICAL=$(nproc --all 2>/dev/null || grep -c '^processor' /proc/cpuinfo)
+    CPU_CORES_PER_SOCKET=$(lscpu_value "Core(s) per socket")
+    CPU_SOCKETS=$(lscpu_value "Socket(s)")
+    if [[ "$CPU_CORES_PER_SOCKET" =~ ^[0-9]+$ && "$CPU_SOCKETS" =~ ^[0-9]+$ ]]; then
+        CPU_CORES=$((CPU_CORES_PER_SOCKET * CPU_SOCKETS))
+    else
+        CPU_CORES=$(nproc --all 2>/dev/null || grep -c '^processor' /proc/cpuinfo)
+    fi
+    CPU_THREADS="$CPU_LOGICAL"
+
+    CPU_MHZ=$(lscpu_value "CPU MHz")
+    [[ -z "$CPU_MHZ" ]] && CPU_MHZ=$(lscpu_value "CPU max MHz")
+    [[ -z "$CPU_MHZ" ]] && CPU_MHZ=$(grep -m1 'cpu MHz' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
+    [[ -n "$CPU_MHZ" ]] && CPU_MHZ=$(awk -v mhz="$CPU_MHZ" 'BEGIN{printf "%.0f MHz", mhz}')
+    [[ -z "$CPU_MHZ" ]] && CPU_MHZ="N/A"
+
+    CPU_VENDOR=$(lscpu_value "Vendor ID")
+    [[ -z "$CPU_VENDOR" ]] && CPU_VENDOR=$(grep -m1 'vendor_id' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)
     if [[ "$CPU_VENDOR" == *"AMD"* ]]; then
         CPU_BRAND="AMD"
         VIRT_FLAG="svm"
-    else
+    elif [[ "$CPU_VENDOR" == *"Intel"* ]]; then
         CPU_BRAND="Intel"
         VIRT_FLAG="vmx"
+    elif [[ "$CPU_ARCH" == arm* || "$CPU_ARCH" == aarch* || "$DEVICE_MODEL" == *"Raspberry Pi"* ]]; then
+        CPU_BRAND="ARM"
+        VIRT_FLAG=""
+    else
+        CPU_BRAND="${CPU_VENDOR:-Unknown}"
+        VIRT_FLAG=""
     fi
 
     CPU_FLAGS=$(grep -m1 '^flags' /proc/cpuinfo 2>/dev/null)
-    [[ "$CPU_FLAGS" == *"$VIRT_FLAG"* ]] && VIRT="Yes ($CPU_BRAND-V)" || VIRT="No"
+    [[ -z "$CPU_FLAGS" ]] && CPU_FLAGS=$(grep -m1 '^Features' /proc/cpuinfo 2>/dev/null)
+    if [[ -n "$VIRT_FLAG" ]]; then
+        [[ "$CPU_FLAGS" == *"$VIRT_FLAG"* ]] && VIRT="Yes ($CPU_BRAND-V)" || VIRT="No"
+    else
+        VIRT="N/A"
+    fi
 
-    CPU_SOCKETS="1"
-    CPU_PHYS_CORES=""
+    [[ -z "$CPU_SOCKETS" ]] && CPU_SOCKETS="1"
     if command -v dmidecode &>/dev/null; then
         CPU_SOCKETS=$(dmidecode -t processor 2>/dev/null | grep -c 'Socket Designation:' || echo "1")
-        CPU_PHYS_CORES=$(dmidecode -t processor 2>/dev/null | grep -m1 'Core Count:' | awk '{print $NF}')
         CPU_MAX_MHZ=$(dmidecode -t processor 2>/dev/null | grep -m1 'Max Speed:' | sed 's/.*Max Speed:[[:space:]]*//')
         CPU_SOCKET_TYPE=$(dmidecode -t processor 2>/dev/null | grep -m1 'Socket Designation:' | sed 's/.*Socket Designation:[[:space:]]*//')
     fi
@@ -159,9 +205,11 @@ show_cpu() {
     if command -v mpstat &>/dev/null; then
         CPU_USAGE=$(mpstat 1 1 2>/dev/null | awk '/Average/{printf "%.1f%%", 100-$NF}')
     elif [[ -r /proc/stat ]]; then
-        read -r cpu u n s id wa _ < <(grep '^cpu ' /proc/stat)
+        # shellcheck disable=SC2034
+        read -r CPU_IGNORED u n s id wa _ < <(grep '^cpu ' /proc/stat)
         sleep 0.3
-        read -r cpu2 u2 n2 s2 id2 wa2 _ < <(grep '^cpu ' /proc/stat)
+        # shellcheck disable=SC2034
+        read -r CPU_IGNORED2 u2 n2 s2 id2 wa2 _ < <(grep '^cpu ' /proc/stat)
         total=$(( (u2+n2+s2+id2+wa2) - (u+n+s+id+wa) ))
         idle=$(( id2 - id ))
         (( total > 0 )) && CPU_USAGE=$(awk "BEGIN{printf \"%.1f%%\", 100-($idle/$total*100)}")
@@ -169,13 +217,17 @@ show_cpu() {
 
     row "🔲" "Model"            "$CPU_MODEL"   "$FG_CYAN"
     row "🏭" "Vendor"           "$CPU_BRAND"   "$FG_ORANGE"
+    row "📐" "Architecture"     "$CPU_ARCH"    "$FG_GREEN"
     [[ -n "$CPU_SOCKET_TYPE" ]] && row "🔌" "Socket"   "$CPU_SOCKET_TYPE"  "$FG_GREY"
     row "🧩" "Cores / Threads"  "${CPU_CORES} cores / ${CPU_THREADS} threads" "$FG_YELLOW"
     [[ "$CPU_SOCKETS" -gt 1 ]] 2>/dev/null && row "🖥️ " "Physical Sockets" "$CPU_SOCKETS" "$FG_WHITE"
     row "⚡" "Current Speed"    "$CPU_MHZ"     "$FG_WHITE"
     [[ -n "$CPU_MAX_MHZ" ]]     && row "🚀" "Max (Boost) Speed" "$CPU_MAX_MHZ"  "$FG_CYAN"
-    [[ -n "$CPU_L3" ]]          && row "🗃️" "L3 Cache"          "$CPU_L3"       "$FG_GREY" \
-                                || { [[ -n "$CPU_L1" ]] && row "🗃️ " "Cache" "$CPU_L1" "$FG_GREY"; }
+    if [[ -n "$CPU_L3" ]]; then
+        row "🗃️" "L3 Cache" "$CPU_L3" "$FG_GREY"
+    elif [[ -n "$CPU_L1" ]]; then
+        row "🗃️ " "Cache" "$CPU_L1" "$FG_GREY"
+    fi
     row "🏋️" "CPU Usage"         "$CPU_USAGE"   "$FG_GREEN"
     row "📊" "Load Avg (1/5/15)" "$LOAD"        "$FG_BLUE"
     row "🧪" "Virtualisation"    "$VIRT"        "$FG_PURPLE"
@@ -189,7 +241,6 @@ show_ram() {
     MEM_USED_RAW=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%.1f", (t-a)/1048576}' /proc/meminfo)
     MEM_PCT=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%.0f", (t-a)/t*100}' /proc/meminfo)
     SWAP_TOTAL=$(awk '/SwapTotal/{printf "%.1f GiB", $2/1048576}' /proc/meminfo)
-    SWAP_FREE=$(awk '/SwapFree/{printf "%.1f GiB", $2/1048576}' /proc/meminfo)
     SWAP_PCT=$(awk '/SwapTotal/{t=$2}/SwapFree/{f=$2}END{if(t>0) printf "%.0f", (t-f)/t*100; else print "0"}' /proc/meminfo)
 
     MEM_BAR=$(bar "$MEM_PCT")
@@ -258,6 +309,7 @@ show_ram() {
         while IFS= read -r line; do
             if [[ "$line" == Handle* ]] && [[ "$line" =~ [Dd][Mm][Ii] ]] && [[ "$line" =~ type[[:space:]]*17 ]]; then
                 parse_dimm_block "$BLOCK_TMP"
+                # shellcheck disable=SC2188 # intentional file truncation without a command
                 > "$BLOCK_TMP"
                 in_block=true
             else
@@ -382,7 +434,7 @@ fi
 clear
 echo -e "${FG_ORANGE}${BOLD}"
 echo "  ╔═════════════════════════════════════════════════════╗"
-echo "  ║  🐧  U B U N T U   S Y S T E M   I N S P E C T O R  ║"
+echo "  ║  🐧   L I N U X   S Y S T E M   I N S P E C T O R   ║"
 echo "  ╚═════════════════════════════════════════════════════╝"
 echo -e "${RESET}"
 echo -e "${FG_GREY}  Scan started: $(date '+%A, %d %B %Y  %H:%M:%S %Z')${RESET}"
@@ -403,5 +455,5 @@ echo -e "${FG_GREY}  Scan started: $(date '+%A, %d %B %Y  %H:%M:%S %Z')${RESET}"
 echo ""
 echo -e "${FG_GREY}  $(printf '─%.0s' {1..54})${RESET}"
 echo -e "  ${FG_ORANGE}${BOLD}✅  Scan complete${RESET}  ${FG_GREY}$(date '+%H:%M:%S')${RESET}"
-echo -e "${FG_GREY}  sysinfo.sh · Ubuntu System Inspector${RESET}"
+echo -e "${FG_GREY}  sysinfo.sh · Linux System Inspector${RESET}"
 echo ""
