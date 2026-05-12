@@ -6,7 +6,7 @@ A shell script to display hardware and system information.
 
 > **Linux only.** This script relies on Linux-specific interfaces (`/proc`, `/sys`, `dmidecode`, `lsblk`, `ip`, etc.) and will not work on macOS or Windows.
 >
-> Tested on Debian-based distros (Ubuntu, Debian, etc.).
+> Tested on Debian-based distros (Ubuntu, Debian, Raspberry Pi OS, etc.).
 
 ### Usage
 
