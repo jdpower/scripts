@@ -63,7 +63,7 @@ bar() {
     elif (( pct >= 50 )); then color="$FG_YELLOW"
     else color="$FG_GREEN"
     fi
-    printf '%s[' "$color"
+    printf '%b[' "$color"
     printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
     printf '░%.0s' $(seq 1 $empty  2>/dev/null) 2>/dev/null || true
     printf "] %3s%%${RESET}" "$pct"
