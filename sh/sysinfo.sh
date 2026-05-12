@@ -182,7 +182,6 @@ show_cpu() {
     fi
 
     [[ -z "$CPU_SOCKETS" ]] && CPU_SOCKETS="1"
-    CPU_PHYS_CORES=""
     if command -v dmidecode &>/dev/null; then
         CPU_SOCKETS=$(dmidecode -t processor 2>/dev/null | grep -c 'Socket Designation:' || echo "1")
         CPU_MAX_MHZ=$(dmidecode -t processor 2>/dev/null | grep -m1 'Max Speed:' | sed 's/.*Max Speed:[[:space:]]*//')
