@@ -63,7 +63,7 @@ bar() {
     elif (( pct >= 50 )); then color="$FG_YELLOW"
     else color="$FG_GREEN"
     fi
-    printf '%b[' "$color"
+    printf '%s[' "$color"
     printf '█%.0s' $(seq 1 $filled 2>/dev/null) 2>/dev/null || true
     printf '░%.0s' $(seq 1 $empty  2>/dev/null) 2>/dev/null || true
     printf "] %3s%%${RESET}" "$pct"
@@ -309,7 +309,7 @@ show_ram() {
         while IFS= read -r line; do
             if [[ "$line" == Handle* ]] && [[ "$line" =~ [Dd][Mm][Ii] ]] && [[ "$line" =~ type[[:space:]]*17 ]]; then
                 parse_dimm_block "$BLOCK_TMP"
-                printf '' > "$BLOCK_TMP"
+                cat /dev/null > "$BLOCK_TMP"
                 in_block=true
             else
                 [[ "$in_block" == true ]] && printf '%s\n' "$line" >> "$BLOCK_TMP"
