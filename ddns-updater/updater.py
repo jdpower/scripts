@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""One-shot DDNS updater with Cloudflare support."""
+"""DDNS updater with Cloudflare support and optional internal polling."""
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import ipaddress
 import json
 import os
+import signal
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 from urllib import error, parse, request
@@ -44,6 +48,12 @@ class CloudflareConfig:
     record_name: str
     record_type: str
     record_id: str = ""
+
+
+@dataclass
+class CycleResult:
+    public_ip: str
+    action: str
 
 
 def log_info(message: str) -> None:
@@ -170,25 +180,25 @@ def cloudflare_error_summary(body: Dict[str, object], fallback: str) -> str:
 
 def load_cloudflare_config(env: Dict[str, str]) -> CloudflareConfig:
     required = {
-        "API_TOKEN": env.get("API_TOKEN", "").strip(),
-        "ZONE_ID": env.get("ZONE_ID", "").strip(),
-        "RECORD_NAME": env.get("RECORD_NAME", "").strip(),
-        "RECORD_TYPE": env.get("RECORD_TYPE", "").strip().upper(),
+        "CF_API_TOKEN": env.get("CF_API_TOKEN", "").strip(),
+        "CF_ZONE_ID": env.get("CF_ZONE_ID", "").strip(),
+        "CF_RECORD_NAME": env.get("CF_RECORD_NAME", "").strip(),
+        "CF_RECORD_TYPE": env.get("CF_RECORD_TYPE", "").strip().upper(),
     }
 
     missing = [key for key, value in required.items() if not value]
     if missing:
         raise UpdaterError(EXIT_CONFIG, f"missing required configuration: {', '.join(missing)}")
 
-    if required["RECORD_TYPE"] not in {"A", "AAAA"}:
-        raise UpdaterError(EXIT_CONFIG, "RECORD_TYPE must be A or AAAA")
+    if required["CF_RECORD_TYPE"] not in {"A", "AAAA"}:
+        raise UpdaterError(EXIT_CONFIG, "invalid configuration: CF_RECORD_TYPE must be A or AAAA")
 
     return CloudflareConfig(
-        api_token=required["API_TOKEN"],
-        zone_id=required["ZONE_ID"],
-        record_name=required["RECORD_NAME"],
-        record_type=required["RECORD_TYPE"],
-        record_id=env.get("RECORD_ID", "").strip(),
+        api_token=required["CF_API_TOKEN"],
+        zone_id=required["CF_ZONE_ID"],
+        record_name=required["CF_RECORD_NAME"],
+        record_type=required["CF_RECORD_TYPE"],
+        record_id=env.get("CF_RECORD_ID", "").strip(),
     )
 
 
@@ -300,8 +310,17 @@ def cloudflare_update_record(config: CloudflareConfig, record: Dict[str, object]
 
 
 def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
+    def interval_seconds(value: str) -> int:
+        interval = int(value)
+        if interval <= 0:
+            raise argparse.ArgumentTypeError("--interval must be greater than 0")
+        return interval
+
     parser = argparse.ArgumentParser(
-        description="One-shot DDNS updater (run from cron/systemd/Kubernetes scheduler)."
+        description=(
+            "DDNS updater for Cloudflare. Runs once by default, or poll internally with "
+            "--interval (recommended: 300 seconds)."
+        )
     )
     parser.add_argument(
         "--dry-run",
@@ -312,10 +331,59 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
         "--service",
         help=f"DNS provider service name (default: {DEFAULT_SERVICE}).",
     )
+    parser.add_argument(
+        "--interval",
+        type=interval_seconds,
+        help=(
+            "Poll every N seconds inside the container. If omitted, the updater runs once "
+            "and exits. Recommended: 300."
+        ),
+    )
     return parser.parse_args(argv)
 
 
-def run(argv: Optional[list[str]] = None, environ: Optional[Dict[str, str]] = None) -> int:
+def install_signal_handlers(stop_event: threading.Event) -> None:
+    def handle_shutdown(signum: int, _frame: object) -> None:
+        signal_name = signal.Signals(signum).name
+        if not stop_event.is_set():
+            log_info(f"Received {signal_name}; shutting down cleanly.")
+        stop_event.set()
+
+    for signal_name in ("SIGINT", "SIGTERM"):
+        signal_value = getattr(signal, signal_name, None)
+        if signal_value is not None:
+            signal.signal(signal_value, handle_shutdown)
+
+
+def execute_update_cycle(config: CloudflareConfig, *, dry_run: bool) -> CycleResult:
+    public_ip = fetch_public_ip(config.record_type)
+    record = cloudflare_lookup_record(config)
+
+    record_content = str(record.get("content", "")).strip()
+    if record_content == public_ip:
+        return CycleResult(public_ip=public_ip, action="no-change")
+
+    if dry_run:
+        return CycleResult(public_ip=public_ip, action="dry-run")
+
+    cloudflare_update_record(config, record, public_ip)
+    return CycleResult(public_ip=public_ip, action="updated")
+
+
+def log_cycle_result(config: CloudflareConfig, result: CycleResult) -> None:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    updated = "yes" if result.action == "updated" else "no"
+    log_info(
+        f"{timestamp} poll cycle: record={config.record_name} "
+        f"type={config.record_type} ip={result.public_ip} action={result.action} updated={updated}"
+    )
+
+
+def run(
+    argv: Optional[list[str]] = None,
+    environ: Optional[Dict[str, str]] = None,
+    stop_event: Optional[threading.Event] = None,
+) -> int:
     try:
         args = parse_args(argv)
 
@@ -332,23 +400,22 @@ def run(argv: Optional[list[str]] = None, environ: Optional[Dict[str, str]] = No
             )
 
         config = load_cloudflare_config(env)
-        public_ip = fetch_public_ip(config.record_type)
-        record = cloudflare_lookup_record(config)
 
-        record_content = str(record.get("content", "")).strip()
-        if record_content == public_ip:
-            log_info(f"No change for {config.record_name} ({config.record_type})")
+        if args.interval is None:
+            result = execute_update_cycle(config, dry_run=args.dry_run)
+            log_cycle_result(config, result)
             return EXIT_SUCCESS
 
-        if args.dry_run:
-            log_info(
-                f"Dry-run: would update {config.record_name} ({config.record_type}) "
-                f"from {record_content or 'unset'} to {public_ip}"
-            )
-            return EXIT_SUCCESS
+        active_stop_event = stop_event or threading.Event()
+        install_signal_handlers(active_stop_event)
 
-        cloudflare_update_record(config, record, public_ip)
-        log_info(f"Updated {config.record_name} ({config.record_type}) to {public_ip}")
+        while not active_stop_event.is_set():
+            result = execute_update_cycle(config, dry_run=args.dry_run)
+            log_cycle_result(config, result)
+            if active_stop_event.wait(args.interval):
+                break
+
+        log_info("Polling stopped; exiting cleanly.")
         return EXIT_SUCCESS
     except UpdaterError as exc:
         log_error(str(exc))

@@ -1,8 +1,8 @@
 # DDNS Updater
 
-Container-friendly one-shot dynamic DNS updater.
+Container-friendly dynamic DNS updater with optional built-in polling.
 
-This script is designed to run once and exit. Use an external scheduler (cron, systemd timer, Kubernetes CronJob, or cloud scheduler) to invoke it repeatedly.
+Recommended usage is to run the container with `--interval 300` so the updater stays alive and checks every 5 minutes. If you prefer, you can still omit `--interval` and run it as a one-shot command from cron, systemd, Kubernetes CronJob, or another external scheduler.
 
 ## Folder structure
 
@@ -18,13 +18,14 @@ ddns-updater/
 ## CLI usage
 
 ```bash
-python updater.py [--service cloudflare] [--dry-run]
+python updater.py [--service cloudflare] [--dry-run] [--interval 300]
 ```
 
 Options:
 
 - `--service`: DNS provider service name (default: `cloudflare`)
 - `--dry-run`: perform IP/record checks and log intended changes without updating DNS
+- `--interval`: poll every `N` seconds inside the container; recommended value: `300`
 
 Unsupported providers fail with exit code `6`.
 
@@ -43,11 +44,11 @@ Configuration is read from environment variables. `.env` is also supported at ru
 
 | Variable | Required | Description |
 |---|---|---|
-| `API_TOKEN` | Yes | Cloudflare API token |
-| `ZONE_ID` | Yes | Cloudflare zone ID |
-| `RECORD_NAME` | Yes | DNS name to update (for example `home.example.com`) |
-| `RECORD_TYPE` | Yes | `A` or `AAAA` |
-| `RECORD_ID` | No | If set, updater targets this exact DNS record ID directly |
+| `CF_API_TOKEN` | Yes | Cloudflare API token |
+| `CF_ZONE_ID` | Yes | Cloudflare zone ID |
+| `CF_RECORD_NAME` | Yes | DNS name to update (for example `home.example.com`) |
+| `CF_RECORD_TYPE` | Yes | `A` or `AAAA` |
+| `CF_RECORD_ID` | No | If set, updater targets this exact DNS record ID directly |
 
 `RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
 
@@ -59,31 +60,59 @@ Configuration is read from environment variables. `.env` is also supported at ru
 4. Choose the **Edit zone DNS** template (or create a custom token) and scope it to:
    - Permissions: `Zone` / `DNS` / `Edit`
    - Zone Resources: `Include` / `Specific zone` / the zone you want to update
-5. Click **Continue to summary**, then **Create Token**, and copy the generated token immediately (it is only shown once). Use this value for `API_TOKEN`.
+5. Click **Continue to summary**, then **Create Token**, and copy the generated token immediately (it is only shown once). Use this value for `CF_API_TOKEN`.
 
 #### Getting your Cloudflare `ZONE_ID`
 
 1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com/).
 2. Select the domain (zone) you want to update.
 3. On the domain's **Overview** page, scroll down to the **API** section in the right-hand sidebar.
-4. Copy the **Zone ID** value shown there. Use this value for `ZONE_ID`.
+4. Copy the **Zone ID** value shown there. Use this value for `CF_ZONE_ID`.
 
-## Scheduling model and frequency
+## Polling and scheduling
 
-The updater itself does **not** run cron internally.
+### Recommended: built-in polling with `--interval`
 
-Recommended check interval: **every 5 minutes**.
+The easiest way to use the updater is to let the container run its own polling loop:
+
+```bash
+docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest --interval 300
+```
+
+This keeps the container running and performs a full check every 300 seconds (5 minutes):
+
+1. validate required configuration
+2. fetch the current public IP
+3. look up the matching Cloudflare DNS record
+4. compare record content to the detected IP
+5. update only when the value changed
+6. log the poll result with timestamp, IP, and whether an update occurred
+7. sleep until the next interval
+
+The updater handles `SIGINT`/`SIGTERM` so stopping the container exits the polling loop cleanly with exit code `0`.
+
+### Recommended frequency
+
+Recommended check interval: **every 5 minutes** (`--interval 300`).
 
 - This gives practical responsiveness for most dynamic IP environments.
 - The script only performs a write when the IP changed, so frequent checks do not imply frequent updates.
 
-### Cron example (every 5 minutes)
+### Advanced: external scheduler / one-shot mode
+
+If you omit `--interval`, the script runs once and exits. That is useful when you want cron, systemd, or Kubernetes to control the schedule:
+
+```bash
+docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest
+```
+
+### Cron example (every 5 minutes, one-shot mode)
 
 ```cron
 */5 * * * * /usr/bin/docker run --rm --env-file /opt/ddns-updater/.env ddns-updater:latest >> /var/log/ddns-updater.log 2>&1
 ```
 
-### systemd timer example
+### systemd timer example (one-shot mode)
 
 `/etc/systemd/system/ddns-updater.service`
 
@@ -111,7 +140,7 @@ Unit=ddns-updater.service
 WantedBy=timers.target
 ```
 
-### Kubernetes CronJob schedule example
+### Kubernetes CronJob schedule example (one-shot mode)
 
 ```yaml
 schedule: "*/5 * * * *"
@@ -131,7 +160,13 @@ Dry run:
 docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest --dry-run
 ```
 
-Live run:
+Recommended polling run:
+
+```bash
+docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest --interval 300
+```
+
+One-shot run:
 
 ```bash
 docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest
@@ -153,7 +188,7 @@ The Dockerfile uses `python:3.12-slim` because:
 - process runs as a dedicated non-root user
 - only `updater.py` is copied, so `.env` is not baked into the image
 
-Container entrypoint is one-shot: `python /app/updater.py`.
+Container entrypoint is `python /app/updater.py`, which supports either one-shot mode or the internal polling loop.
 
 ## Cloudflare connectivity verification
 
@@ -173,8 +208,8 @@ docker run --rm curlimages/curl -s -o /dev/null -w '%{http_code}\n' https://api.
 
 | Code | Meaning |
 |---|---|
-| 0 | Success (updated or already up-to-date) |
-| 1 | Configuration error |
+| 0 | Success (updated, already up-to-date, or clean polling shutdown) |
+| 1 | Configuration error (missing/invalid required environment variables) |
 | 2 | Network/public IP lookup error |
 | 3 | Cloudflare authentication/authorization error |
 | 4 | DNS record lookup error |
