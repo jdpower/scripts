@@ -1,8 +1,11 @@
 # DDNS Updater
 
-Container-friendly one-shot dynamic DNS updater.
+Container-friendly dynamic DNS updater with built-in polling support.
 
-This script is designed to run once and exit. Use an external scheduler (cron, systemd timer, Kubernetes CronJob, or cloud scheduler) to invoke it repeatedly.
+The script supports two modes:
+
+- **Polling mode** (recommended): pass `--interval-seconds N` or set `DDNS_INTERVAL_SECONDS=N`. The script loops internally, checking and updating every N seconds. Stop the container with `docker stop` for a clean exit.
+- **One-shot mode** (default): no interval specified. The script runs once and exits. Use an external scheduler (cron, systemd timer, Kubernetes CronJob) to call it repeatedly.
 
 ## Folder structure
 
@@ -18,13 +21,14 @@ ddns-updater/
 ## CLI usage
 
 ```bash
-python updater.py [--service cloudflare] [--dry-run]
+python updater.py [--service cloudflare] [--dry-run] [--interval-seconds N]
 ```
 
 Options:
 
 - `--service`: DNS provider service name (default: `cloudflare`)
 - `--dry-run`: perform IP/record checks and log intended changes without updating DNS
+- `--interval-seconds N`: run in polling loop, checking every N seconds; if omitted, run once (one-shot mode)
 
 Unsupported providers fail with exit code `6`.
 
@@ -37,6 +41,7 @@ Configuration is read from environment variables. `.env` is also supported at ru
 | Variable | Required | Description |
 |---|---|---|
 | `DDNS_SERVICE` | No | Default service when `--service` is not provided (`cloudflare`) |
+| `DDNS_INTERVAL_SECONDS` | No | Polling interval in seconds; enables polling mode if set. Overridden by `--interval-seconds` if both are present. |
 | `DDNS_ENV_FILE` | No | Optional path to env file (default `.env`) |
 
 ### Cloudflare
@@ -50,6 +55,8 @@ Configuration is read from environment variables. `.env` is also supported at ru
 | `RECORD_ID` | No | If set, updater targets this exact DNS record ID directly |
 
 `RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
+
+All four required Cloudflare variables (`API_TOKEN`, `ZONE_ID`, `RECORD_NAME`, `RECORD_TYPE`) are validated at startup before any network call. The script exits immediately with code 1 and logs which variables are missing if any are absent.
 
 #### Getting your Cloudflare `API_TOKEN`
 
@@ -68,22 +75,71 @@ Configuration is read from environment variables. `.env` is also supported at ru
 3. On the domain's **Overview** page, scroll down to the **API** section in the right-hand sidebar.
 4. Copy the **Zone ID** value shown there. Use this value for `ZONE_ID`.
 
+## Polling with built-in scheduler
+
+When `--interval-seconds` or `DDNS_INTERVAL_SECONDS` is provided, the script runs a polling loop internally:
+
+1. Validate configuration (fail fast if any required variable is missing)
+2. Loop indefinitely:
+   - Fetch current public IP
+   - Look up DNS record
+   - Update if the IP has changed; skip if unchanged
+   - Log timestamp, detected IP, current record value, and whether an update was made
+   - Sleep for the specified interval (in seconds)
+3. Exit cleanly with code 0 on SIGTERM or SIGINT (Ctrl-C / `docker stop`)
+
+**Interval unit:** seconds. Recommended: `300` seconds (5 minutes).
+
+### Examples
+
+```bash
+# Using CLI flag
+python updater.py --interval-seconds 300
+
+# Using environment variable
+DDNS_INTERVAL_SECONDS=300 python updater.py
+
+# In Docker with built-in polling (CLI flag)
+docker run --rm --env-file .env ddns-updater --interval-seconds 300
+
+# In Docker with built-in polling (env var — add DDNS_INTERVAL_SECONDS=300 to .env)
+docker run --rm --env-file .env ddns-updater
+
+# CLI flag overrides env var if both are present
+docker run --rm --env-file .env ddns-updater --interval-seconds 600
+```
+
+### One-shot mode (no polling)
+
+```bash
+# One-shot mode — run once and exit
+python updater.py
+
+# In Docker, one-shot mode
+docker run --rm --env-file .env ddns-updater
+```
+
 ## Scheduling model and frequency
 
-The updater itself does **not** run cron internally.
+### Easy option (recommended): built-in polling
 
-Recommended check interval: **every 5 minutes**.
+Pass `--interval-seconds` or set `DDNS_INTERVAL_SECONDS` in `.env`. The container runs continuously and polls automatically. No external scheduler is required.
 
-- This gives practical responsiveness for most dynamic IP environments.
-- The script only performs a write when the IP changed, so frequent checks do not imply frequent updates.
+```bash
+docker run -d --restart unless-stopped --env-file /opt/ddns-updater/.env ddns-updater:latest --interval-seconds 300
+```
 
-### Cron example (every 5 minutes)
+### Advanced option: external scheduler (one-shot mode)
+
+For environments where you already use a scheduler, keep the container in one-shot mode and let the scheduler call it.
+
+#### Cron example (every 5 minutes)
 
 ```cron
 */5 * * * * /usr/bin/docker run --rm --env-file /opt/ddns-updater/.env ddns-updater:latest >> /var/log/ddns-updater.log 2>&1
 ```
 
-### systemd timer example
+#### systemd timer example
 
 `/etc/systemd/system/ddns-updater.service`
 
@@ -111,7 +167,7 @@ Unit=ddns-updater.service
 WantedBy=timers.target
 ```
 
-### Kubernetes CronJob schedule example
+#### Kubernetes CronJob schedule example
 
 ```yaml
 schedule: "*/5 * * * *"
@@ -131,10 +187,16 @@ Dry run:
 docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest --dry-run
 ```
 
-Live run:
+Live run (one-shot):
 
 ```bash
 docker run --rm --env-file ./ddns-updater/.env ddns-updater:latest
+```
+
+Live run (polling every 5 minutes):
+
+```bash
+docker run -d --restart unless-stopped --env-file ./ddns-updater/.env ddns-updater:latest --interval-seconds 300
 ```
 
 Explicit service:
@@ -173,8 +235,8 @@ docker run --rm curlimages/curl -s -o /dev/null -w '%{http_code}\n' https://api.
 
 | Code | Meaning |
 |---|---|
-| 0 | Success (updated or already up-to-date) |
-| 1 | Configuration error |
+| 0 | Success (updated, already up-to-date, or clean shutdown from polling) |
+| 1 | Configuration error (missing required env vars or invalid value) |
 | 2 | Network/public IP lookup error |
 | 3 | Cloudflare authentication/authorization error |
 | 4 | DNS record lookup error |
@@ -195,3 +257,4 @@ Run tests without real network/API access:
 ```bash
 python -m unittest discover -s ddns-updater -p 'test_*.py'
 ```
+
