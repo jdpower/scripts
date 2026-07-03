@@ -43,13 +43,30 @@ Configuration is read from environment variables. `.env` is also supported at ru
 
 | Variable | Required | Description |
 |---|---|---|
-| `CF_API_TOKEN` | Yes | Cloudflare API token |
-| `CF_ZONE_ID` | Yes | Cloudflare zone ID |
-| `CF_RECORD_NAME` | Yes | DNS name to update (for example `home.example.com`) |
-| `CF_RECORD_TYPE` | Yes | `A` or `AAAA` |
-| `CF_RECORD_ID` | No | If set, updater targets this exact DNS record ID directly |
+| `API_TOKEN` | Yes | Cloudflare API token |
+| `ZONE_ID` | Yes | Cloudflare zone ID |
+| `RECORD_NAME` | Yes | DNS name to update (for example `home.example.com`) |
+| `RECORD_TYPE` | Yes | `A` or `AAAA` |
+| `RECORD_ID` | No | If set, updater targets this exact DNS record ID directly |
 
-`CF_RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
+`RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
+
+#### Getting your Cloudflare `API_TOKEN`
+
+1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com/).
+2. Go to **My Profile** (top-right avatar) > **API Tokens**.
+3. Click **Create Token**.
+4. Choose the **Edit zone DNS** template (or create a custom token) and scope it to:
+   - Permissions: `Zone` / `DNS` / `Edit`
+   - Zone Resources: `Include` / `Specific zone` / the zone you want to update
+5. Click **Continue to summary**, then **Create Token**, and copy the generated token immediately (it is only shown once). Use this value for `API_TOKEN`.
+
+#### Getting your Cloudflare `ZONE_ID`
+
+1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com/).
+2. Select the domain (zone) you want to update.
+3. On the domain's **Overview** page, scroll down to the **API** section in the right-hand sidebar.
+4. Copy the **Zone ID** value shown there. Use this value for `ZONE_ID`.
 
 ## Scheduling model and frequency
 
