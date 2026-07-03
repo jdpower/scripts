@@ -11,7 +11,6 @@ import os
 import signal
 import sys
 import threading
-import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 from urllib import error, parse, request

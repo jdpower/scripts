@@ -50,9 +50,9 @@ Configuration is read from environment variables. `.env` is also supported at ru
 | `CF_RECORD_TYPE` | Yes | `A` or `AAAA` |
 | `CF_RECORD_ID` | No | If set, updater targets this exact DNS record ID directly |
 
-`RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
+`CF_RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
 
-#### Getting your Cloudflare `API_TOKEN`
+#### Getting your Cloudflare `CF_API_TOKEN`
 
 1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com/).
 2. Go to **My Profile** (top-right avatar) > **API Tokens**.
@@ -62,7 +62,7 @@ Configuration is read from environment variables. `.env` is also supported at ru
    - Zone Resources: `Include` / `Specific zone` / the zone you want to update
 5. Click **Continue to summary**, then **Create Token**, and copy the generated token immediately (it is only shown once). Use this value for `CF_API_TOKEN`.
 
-#### Getting your Cloudflare `ZONE_ID`
+#### Getting your Cloudflare `CF_ZONE_ID`
 
 1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com/).
 2. Select the domain (zone) you want to update.
