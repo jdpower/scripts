@@ -1,6 +1,6 @@
 # Useful shell scripts
 
-## sysinfo.sh
+## hwinfo.sh
 
 A shell script to display hardware and system information.
 
@@ -11,10 +11,10 @@ A shell script to display hardware and system information.
 ### Usage
 
 ```bash
-./sysinfo.sh              # run all sections
-./sysinfo.sh -c           # CPU only
-./sysinfo.sh -c -r        # CPU and RAM
-./sysinfo.sh -h           # help
+./hwinfo.sh              # run all sections
+./hwinfo.sh -c           # CPU only
+./hwinfo.sh -c -r        # CPU and RAM
+./hwinfo.sh -h           # help
 ```
 
 ### Flags
