@@ -1,6 +1,6 @@
 # Useful shell scripts
 
-## hwinfo.sh
+## hw-scanner.sh
 
 A shell script to display hardware and system information.
 
@@ -11,10 +11,10 @@ A shell script to display hardware and system information.
 ### Usage
 
 ```bash
-./hwinfo.sh              # run all sections
-./hwinfo.sh -c           # CPU only
-./hwinfo.sh -c -r        # CPU and RAM
-./hwinfo.sh -h           # help
+./hw-scanner.sh              # run all sections
+./hw-scanner.sh -c           # CPU only
+./hw-scanner.sh -c -r        # CPU and RAM
+./hw-scanner.sh -h           # help
 ```
 
 ### Flags
