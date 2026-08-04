@@ -41,6 +41,16 @@ class UpdaterTests(unittest.TestCase):
             "invalid configuration: CF_RECORD_TYPE must be A or AAAA"
         )
 
+    def test_config_validation_reports_var_names(self):
+        env = dict(self.env)
+        env.pop("CF_API_TOKEN")
+        env.pop("CF_ZONE_ID")
+        with mock.patch("updater.log_error") as log_mock:
+            updater.run([], environ=env)
+        logged = log_mock.call_args[0][0]
+        self.assertIn("CF_API_TOKEN", logged)
+        self.assertIn("CF_ZONE_ID", logged)
+
     def test_unsupported_provider(self):
         exit_code = updater.run(["--service", "example"], environ=self.env)
         self.assertEqual(exit_code, updater.EXIT_UNSUPPORTED_PROVIDER)

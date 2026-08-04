@@ -52,6 +52,8 @@ Configuration is read from environment variables. `.env` is also supported at ru
 
 `CF_RECORD_ID` avoids name/type lookup ambiguity and updates one known record.
 
+All four required Cloudflare variables (`CF_API_TOKEN`, `CF_ZONE_ID`, `CF_RECORD_NAME`, `CF_RECORD_TYPE`) are validated at startup before any network call. The script exits immediately with code `1` and logs which variables are missing or invalid if configuration is incomplete.
+
 #### Getting your Cloudflare `CF_API_TOKEN`
 
 1. Log in to the [Cloudflare dashboard](https://dash.cloudflare.com/).
