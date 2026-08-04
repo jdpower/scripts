@@ -4,3 +4,4 @@
 
 - `hw-scanner/` — Hardware and system information collection scripts
 - `ddns-updater/` — Dynamic DNS updater with Cloudflare support, runs in a container
+- `ubuntu/` — Ubuntu/Debian setup scripts and terminal environment documentation
