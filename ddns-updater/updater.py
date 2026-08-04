@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""DDNS updater with Cloudflare support and optional internal polling."""
+"""DDNS updater with Cloudflare support.
+
+Supports one-shot mode (default) and polling mode via --interval-seconds or
+DDNS_INTERVAL_SECONDS. In polling mode the script loops indefinitely until
+stopped with SIGTERM or SIGINT (Ctrl-C), which both exit cleanly with code 0.
+"""
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+import datetime
 import ipaddress
 import json
 import os
 import signal
 import sys
-import threading
+import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 from urllib import error, parse, request
@@ -190,7 +195,7 @@ def load_cloudflare_config(env: Dict[str, str]) -> CloudflareConfig:
         raise UpdaterError(EXIT_CONFIG, f"missing required configuration: {', '.join(missing)}")
 
     if required["CF_RECORD_TYPE"] not in {"A", "AAAA"}:
-        raise UpdaterError(EXIT_CONFIG, "invalid configuration: CF_RECORD_TYPE must be A or AAAA")
+        raise UpdaterError(EXIT_CONFIG, "CF_RECORD_TYPE must be A or AAAA")
 
     return CloudflareConfig(
         api_token=required["CF_API_TOKEN"],
@@ -316,10 +321,7 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
         return interval
 
     parser = argparse.ArgumentParser(
-        description=(
-            "DDNS updater for Cloudflare. Runs once by default, or poll internally with "
-            "--interval (recommended: 300 seconds)."
-        )
+        description="DDNS updater with Cloudflare support (one-shot or polling mode)."
     )
     parser.add_argument(
         "--dry-run",
@@ -331,58 +333,53 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
         help=f"DNS provider service name (default: {DEFAULT_SERVICE}).",
     )
     parser.add_argument(
-        "--interval",
-        type=interval_seconds,
+        "--interval-seconds",
+        type=int,
+        metavar="N",
+        default=None,
+        dest="interval_seconds",
         help=(
-            "Poll every N seconds inside the container. If omitted, the updater runs once "
-            "and exits. Recommended: 300."
+            "Run in polling mode, checking every N seconds. "
+            "Overrides DDNS_INTERVAL_SECONDS if both are set. "
+            "If omitted, run once (one-shot mode) and exit."
         ),
     )
     return parser.parse_args(argv)
 
 
-def install_signal_handlers(stop_event: threading.Event) -> None:
-    def handle_shutdown(signum: int, _frame: object) -> None:
-        signal_name = signal.Signals(signum).name
-        if not stop_event.is_set():
-            log_info(f"Received {signal_name}; shutting down cleanly.")
-        stop_event.set()
-
-    for signal_name in ("SIGINT", "SIGTERM"):
-        signal_value = getattr(signal, signal_name, None)
-        if signal_value is not None:
-            signal.signal(signal_value, handle_shutdown)
+def _handle_sigterm(signum: int, frame: object) -> None:  # type: ignore[type-arg]
+    raise KeyboardInterrupt
 
 
-def execute_update_cycle(config: CloudflareConfig, *, dry_run: bool) -> CycleResult:
+def _run_cycle(config: CloudflareConfig, dry_run: bool) -> None:
+    """Perform one check/update cycle and log the result."""
+    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     public_ip = fetch_public_ip(config.record_type)
     record = cloudflare_lookup_record(config)
-
     record_content = str(record.get("content", "")).strip()
+
     if record_content == public_ip:
-        return CycleResult(public_ip=public_ip, action="no-change")
+        log_info(
+            f"[{timestamp}] {config.record_name} ({config.record_type}): "
+            f"no change (IP: {public_ip}, record: {record_content})"
+        )
+        return
 
     if dry_run:
-        return CycleResult(public_ip=public_ip, action="dry-run")
+        log_info(
+            f"[{timestamp}] {config.record_name} ({config.record_type}): "
+            f"dry-run: would update from {record_content or 'unset'} to {public_ip}"
+        )
+        return
 
     cloudflare_update_record(config, record, public_ip)
-    return CycleResult(public_ip=public_ip, action="updated")
-
-
-def log_cycle_result(config: CloudflareConfig, result: CycleResult) -> None:
-    timestamp = datetime.now(timezone.utc).isoformat()
-    updated = "yes" if result.action == "updated" else "no"
     log_info(
-        f"{timestamp} poll cycle: record={config.record_name} "
-        f"type={config.record_type} ip={result.public_ip} action={result.action} updated={updated}"
+        f"[{timestamp}] {config.record_name} ({config.record_type}): "
+        f"updated from {record_content or 'unset'} to {public_ip}"
     )
 
 
-def run(
-    argv: Optional[list[str]] = None,
-    environ: Optional[Dict[str, str]] = None,
-    stop_event: Optional[threading.Event] = None,
-) -> int:
+def run(argv: Optional[list[str]] = None, environ: Optional[Dict[str, str]] = None) -> int:
     try:
         args = parse_args(argv)
 
@@ -398,24 +395,36 @@ def run(
                 f"unsupported service '{service}'; currently supported: cloudflare",
             )
 
+        # Fail fast: validate all required config before any network calls.
         config = load_cloudflare_config(env)
 
-        if args.interval is None:
-            result = execute_update_cycle(config, dry_run=args.dry_run)
-            log_cycle_result(config, result)
+        # Determine polling interval: CLI flag takes precedence over env var.
+        interval = args.interval_seconds
+        if interval is None:
+            interval_str = env.get("DDNS_INTERVAL_SECONDS", "").strip()
+            if interval_str:
+                try:
+                    interval = int(interval_str)
+                except ValueError:
+                    raise UpdaterError(
+                        EXIT_CONFIG,
+                        "DDNS_INTERVAL_SECONDS must be a valid integer number of seconds",
+                    )
+
+        if interval is not None:
+            log_info(f"Starting DDNS updater in polling mode (interval: {interval}s)")
+            signal.signal(signal.SIGTERM, _handle_sigterm)
+            try:
+                while True:
+                    _run_cycle(config, args.dry_run)
+                    time.sleep(interval)
+            except KeyboardInterrupt:
+                log_info("Shutting down DDNS updater")
+                return EXIT_SUCCESS
+        else:
+            _run_cycle(config, args.dry_run)
             return EXIT_SUCCESS
 
-        active_stop_event = stop_event or threading.Event()
-        install_signal_handlers(active_stop_event)
-
-        while not active_stop_event.is_set():
-            result = execute_update_cycle(config, dry_run=args.dry_run)
-            log_cycle_result(config, result)
-            if active_stop_event.wait(args.interval):
-                break
-
-        log_info("Polling stopped; exiting cleanly.")
-        return EXIT_SUCCESS
     except UpdaterError as exc:
         log_error(str(exc))
         return exc.exit_code
