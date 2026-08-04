@@ -9,29 +9,57 @@ import updater
 class UpdaterTests(unittest.TestCase):
     def setUp(self):
         self.env = {
-            "API_TOKEN": "token",
-            "ZONE_ID": "zone-id",
-            "RECORD_NAME": "home.example.com",
-            "RECORD_TYPE": "A",
-            "RECORD_ID": "",
+            "CF_API_TOKEN": "token",
+            "CF_ZONE_ID": "zone-id",
+            "CF_RECORD_NAME": "home.example.com",
+            "CF_RECORD_TYPE": "A",
+            "CF_RECORD_ID": "",
             "DDNS_ENV_FILE": "/does/not/exist",
         }
 
-    def test_config_validation_missing_required_value(self):
+    @mock.patch("updater.fetch_public_ip")
+    @mock.patch("updater.log_error")
+    def test_config_validation_missing_required_value(self, log_error_mock, fetch_public_ip_mock):
         env = dict(self.env)
-        env.pop("API_TOKEN")
+        env.pop("CF_API_TOKEN")
         exit_code = updater.run([], environ=env)
         self.assertEqual(exit_code, updater.EXIT_CONFIG)
+        fetch_public_ip_mock.assert_not_called()
+        log_error_mock.assert_called_once_with("missing required configuration: CF_API_TOKEN")
+
+    @mock.patch("updater.fetch_public_ip")
+    @mock.patch("updater.log_error")
+    def test_config_validation_invalid_record_type(self, log_error_mock, fetch_public_ip_mock):
+        env = dict(self.env)
+        env["CF_RECORD_TYPE"] = "TXT"
+
+        exit_code = updater.run([], environ=env)
+
+        self.assertEqual(exit_code, updater.EXIT_CONFIG)
+        fetch_public_ip_mock.assert_not_called()
+        log_error_mock.assert_called_once_with(
+            "CF_RECORD_TYPE must be A or AAAA"
+        )
 
     def test_config_validation_reports_var_names(self):
         env = dict(self.env)
-        env.pop("API_TOKEN")
-        env.pop("ZONE_ID")
+        env.pop("CF_API_TOKEN")
+        env.pop("CF_ZONE_ID")
         with mock.patch("updater.log_error") as log_mock:
             updater.run([], environ=env)
         logged = log_mock.call_args[0][0]
-        self.assertIn("API_TOKEN", logged)
-        self.assertIn("ZONE_ID", logged)
+        self.assertIn("CF_API_TOKEN", logged)
+        self.assertIn("CF_ZONE_ID", logged)
+
+    def test_config_validation_reports_cf_prefix_var_names(self):
+        env = dict(self.env)
+        env.pop("CF_API_TOKEN")
+        env.pop("CF_ZONE_ID")
+        with mock.patch("updater.log_error") as log_mock:
+            updater.run([], environ=env)
+        logged = log_mock.call_args[0][0]
+        self.assertIn("CF_API_TOKEN", logged)
+        self.assertIn("CF_ZONE_ID", logged)
 
     def test_unsupported_provider(self):
         exit_code = updater.run(["--service", "example"], environ=self.env)
@@ -130,10 +158,10 @@ class UpdaterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             env_path = os.path.join(tmp_dir, ".env")
             with open(env_path, "w", encoding="utf-8") as dotenv:
-                dotenv.write("API_TOKEN=token\n")
-                dotenv.write("ZONE_ID=zone-id\n")
-                dotenv.write("RECORD_NAME=home.example.com\n")
-                dotenv.write("RECORD_TYPE=A\n")
+                dotenv.write("CF_API_TOKEN=token\n")
+                dotenv.write("CF_ZONE_ID=zone-id\n")
+                dotenv.write("CF_RECORD_NAME=home.example.com\n")
+                dotenv.write("CF_RECORD_TYPE=A\n")
 
             env = {"DDNS_ENV_FILE": env_path}
             with mock.patch("updater.fetch_public_ip", return_value="203.0.113.1"), mock.patch(
@@ -154,11 +182,11 @@ class UpdaterTests(unittest.TestCase):
 class PollingModeTests(unittest.TestCase):
     def setUp(self):
         self.env = {
-            "API_TOKEN": "token",
-            "ZONE_ID": "zone-id",
-            "RECORD_NAME": "home.example.com",
-            "RECORD_TYPE": "A",
-            "RECORD_ID": "",
+            "CF_API_TOKEN": "token",
+            "CF_ZONE_ID": "zone-id",
+            "CF_RECORD_NAME": "home.example.com",
+            "CF_RECORD_TYPE": "A",
+            "CF_RECORD_ID": "",
             "DDNS_ENV_FILE": "/does/not/exist",
         }
         self._record = {

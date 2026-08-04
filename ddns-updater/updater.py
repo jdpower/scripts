@@ -54,6 +54,12 @@ class CloudflareConfig:
     record_id: str = ""
 
 
+@dataclass
+class CycleResult:
+    public_ip: str
+    action: str
+
+
 def log_info(message: str) -> None:
     print(message)
 
@@ -178,25 +184,25 @@ def cloudflare_error_summary(body: Dict[str, object], fallback: str) -> str:
 
 def load_cloudflare_config(env: Dict[str, str]) -> CloudflareConfig:
     required = {
-        "API_TOKEN": env.get("API_TOKEN", "").strip(),
-        "ZONE_ID": env.get("ZONE_ID", "").strip(),
-        "RECORD_NAME": env.get("RECORD_NAME", "").strip(),
-        "RECORD_TYPE": env.get("RECORD_TYPE", "").strip().upper(),
+        "CF_API_TOKEN": env.get("CF_API_TOKEN", "").strip(),
+        "CF_ZONE_ID": env.get("CF_ZONE_ID", "").strip(),
+        "CF_RECORD_NAME": env.get("CF_RECORD_NAME", "").strip(),
+        "CF_RECORD_TYPE": env.get("CF_RECORD_TYPE", "").strip().upper(),
     }
 
     missing = [key for key, value in required.items() if not value]
     if missing:
         raise UpdaterError(EXIT_CONFIG, f"missing required configuration: {', '.join(missing)}")
 
-    if required["RECORD_TYPE"] not in {"A", "AAAA"}:
-        raise UpdaterError(EXIT_CONFIG, "RECORD_TYPE must be A or AAAA")
+    if required["CF_RECORD_TYPE"] not in {"A", "AAAA"}:
+        raise UpdaterError(EXIT_CONFIG, "CF_RECORD_TYPE must be A or AAAA")
 
     return CloudflareConfig(
-        api_token=required["API_TOKEN"],
-        zone_id=required["ZONE_ID"],
-        record_name=required["RECORD_NAME"],
-        record_type=required["RECORD_TYPE"],
-        record_id=env.get("RECORD_ID", "").strip(),
+        api_token=required["CF_API_TOKEN"],
+        zone_id=required["CF_ZONE_ID"],
+        record_name=required["CF_RECORD_NAME"],
+        record_type=required["CF_RECORD_TYPE"],
+        record_id=env.get("CF_RECORD_ID", "").strip(),
     )
 
 
@@ -308,6 +314,12 @@ def cloudflare_update_record(config: CloudflareConfig, record: Dict[str, object]
 
 
 def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
+    def interval_seconds(value: str) -> int:
+        interval = int(value)
+        if interval <= 0:
+            raise argparse.ArgumentTypeError("--interval must be greater than 0")
+        return interval
+
     parser = argparse.ArgumentParser(
         description="DDNS updater with Cloudflare support (one-shot or polling mode)."
     )
