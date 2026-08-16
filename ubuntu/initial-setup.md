@@ -55,7 +55,7 @@ Or browse the [theme gallery](https://github.com/ohmyzsh/ohmyzsh/wiki/Themes).
 ### Popular Built-in Themes
 
 | Theme | Description |
-|-------|-------------|
+| ------- | ------------- |
 | `robbyrussell` | Default. Clean, minimal prompt with git status |
 | `agnoster` | Powerline-style, shows git branch and status |
 | `bureau` | Two-line prompt with user, dir, git info |
@@ -104,6 +104,7 @@ fc-cache -fv
 ```
 
 Then set **MesloLGS NF** as your terminal emulator's font:
+
 - **GNOME Terminal**: Preferences → Profile → Text → Custom font
 - **Konsole**: Settings → Edit Current Profile → Appearance → Font
 - **Tilix**: Preferences → Profile → General → Custom Font
@@ -214,7 +215,7 @@ source ~/.zshrc
 Built into Oh My Zsh. Provides aliases and functions for common git operations:
 
 | Alias | Command |
-|-------|---------|
+| ------- | --------- |
 | `g` | `git` |
 | `ga` | `git add` |
 | `gaa` | `git add --all` |
@@ -269,7 +270,7 @@ fi
 ## 9. Troubleshooting
 
 | Issue | Fix |
-|-------|-----|
+| ------- | ----- |
 | Icons show as boxes or `?` | Install MesloLGS NF font and set it in your terminal |
 | `p10k configure` not found | Confirm `ZSH_THEME="powerlevel10k/powerlevel10k"` and `source ~/.zshrc` |
 | Autosuggestions not appearing | Check plugin is in the `plugins=()` list and reload shell |
