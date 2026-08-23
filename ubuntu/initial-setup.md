@@ -66,6 +66,7 @@ Or browse the [theme gallery](https://github.com/ohmyzsh/ohmyzsh/wiki/Themes).
 | `jonathan` | Multiline with time, user, and path |
 | `juanghurtado` | Clean two-line with git info |
 | `ys` | Clean, two-line, shows full path and git |
+| `powerlevel10k/powerlevel10k` | Fast, highly customizable, interactive config wizard — see [Section 5](#5-install-powerlevel10k-recommended-theme) |
 
 ### Change Theme
 
@@ -230,7 +231,7 @@ Built into Oh My Zsh. Provides aliases and functions for common git operations:
 
 Full alias list: `alias | grep git`
 
-### zsh-autosuggestions
+### plugin zsh-autosuggestions
 
 - Suggestions appear in grey as you type
 - Press `→` (right arrow) or `End` to accept the full suggestion

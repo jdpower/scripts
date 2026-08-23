@@ -13,6 +13,9 @@ RESET='\033[0m'
 # ─── Dry-run flag (set by --dry-run argument) ─────────────────────────────────
 DRY_RUN=false
 
+# ─── Set by install_fonts() so print_summary() knows whether to mention it ────
+FONTS_INSTALLED=false
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 info()    { echo -e "${BLUE}[INFO]${RESET}  $*"; }
 success() { echo -e "${GREEN}[OK]${RESET}    $*"; }
@@ -101,6 +104,20 @@ require_cmd() {
     return
   fi
   command -v "$1" &>/dev/null || die "Required command '$1' not found after install — check your PATH."
+}
+
+# is_desktop — true if this looks like a desktop install (has a display
+# server or desktop metapackage), false for a headless/server install.
+# Checked via installed packages/services rather than $DISPLAY, since this
+# script is often run over SSH even on a desktop machine.
+is_desktop() {
+  if dpkg -l 2>/dev/null | grep -qE '^ii\s+(ubuntu-desktop|ubuntu-desktop-minimal|gnome-shell|xserver-xorg)\b'; then
+    return 0
+  fi
+  if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+    return 0
+  fi
+  return 1
 }
 
 # ─── Step 1: Packages ────────────────────────────────────────────────────────
@@ -198,6 +215,13 @@ install_omz() {
 install_fonts() {
   step "Step 4 — Installing MesloLGS NF fonts"
 
+  if ! is_desktop; then
+    warn "No desktop environment detected (headless/server install) — skipping font install."
+    warn "The terminal font only matters for a local GUI terminal; on a server,"
+    warn "the prompt renders in whatever terminal you SSH in from on your client machine."
+    return
+  fi
+
   local font_dir="$HOME/.local/share/fonts"
 
   local font_names=(
@@ -248,6 +272,7 @@ install_fonts() {
 
   success "Fonts installed to $font_dir"
   warn "Remember to set 'MesloLGS NF' as your terminal emulator's font manually."
+  FONTS_INSTALLED=true
 }
 
 # ─── Step 5: Powerlevel10k ────────────────────────────────────────────────────
@@ -423,14 +448,23 @@ print_summary() {
     echo -e "${GREEN}${BOLD}╚══════════════════════════════════════════════╝${RESET}"
     echo ""
     echo -e "${BOLD}Next steps:${RESET}"
-    echo "  1. Set your terminal font to 'MesloLGS NF'"
-    echo "     GNOME Terminal : Preferences → Profile → Text → Custom font"
-    echo "     Konsole        : Settings → Edit Profile → Appearance → Font"
-    echo "     VS Code        : settings.json → \"terminal.integrated.fontFamily\": \"MesloLGS NF\""
+    local step_num=1
+    if $FONTS_INSTALLED; then
+      echo "  $step_num. Set your terminal font to 'MesloLGS NF'"
+      echo "     GNOME Terminal : Preferences → Profile → Text → Custom font"
+      echo "     Konsole        : Settings → Edit Profile → Appearance → Font"
+      echo "     VS Code        : settings.json → \"terminal.integrated.fontFamily\": \"MesloLGS NF\""
+      echo ""
+      step_num=$(( step_num + 1 ))
+    else
+      echo "  (Headless/server install detected — skipped installing MesloLGS NF locally."
+      echo "   If you SSH in from a client with a GUI terminal, install/set that font there instead.)"
+      echo ""
+    fi
+    echo "  $step_num. Log out and back in (or open a new terminal) to start using Zsh"
+    step_num=$(( step_num + 1 ))
     echo ""
-    echo "  2. Log out and back in (or open a new terminal) to start using Zsh"
-    echo ""
-    echo "  3. The Powerlevel10k wizard will launch automatically."
+    echo "  $step_num. The Powerlevel10k wizard will launch automatically."
     echo "     To re-run it later: p10k configure"
     echo ""
     echo -e "${YELLOW}Tip:${RESET} Press → (right arrow) to accept autosuggestions as you type."
